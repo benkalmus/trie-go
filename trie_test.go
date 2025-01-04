@@ -64,3 +64,29 @@ func TestTrieInsert(t *testing.T) {
 		assert.Equal(t, expected, values)
 	})
 }
+
+func TestTrieSearch(t *testing.T) {
+	t.Run("find key and fetch value", func(t *testing.T) {
+		trie := NewTrie[string]()
+		word := "hello"
+		val := "ok"
+		err := trie.Insert(word, val)
+		assert.Equal(t, nil, err, "expected no errors on insert")
+
+		got, err := trie.Search(word)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, val, got)
+	})
+	t.Run("if key does not exist, return err", func(t *testing.T) {
+		trie := NewTrie[string]()
+		word := "hello"
+		search := "hello2"
+		val := "ok"
+		err := trie.Insert(word, val)
+		assert.Equal(t, nil, err, "expected no errors on insert")
+
+		got, err := trie.Search(search)
+		assert.Equal(t, ErrNotFound, err)
+		assert.Equal(t, "", got)
+	})
+}

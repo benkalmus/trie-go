@@ -7,16 +7,19 @@ import (
 	"strings"
 )
 
-var ErrAlreadyExists = errors.New("val already exists in trie")
+var (
+	ErrAlreadyExists = errors.New("val already exists in trie")
+	ErrNotFound      = errors.New("key not found in trie")
+)
 
 type Trie[T any] struct {
 	Root *Node[T]
 }
 
 type Node[T any] struct {
+	Value    T
 	Children []*Node[T]
 	KeyRune  rune
-	Value    T
 	IsEnd    bool
 }
 
@@ -65,22 +68,39 @@ func (t *Trie[T]) Insert(key string, value T) error {
 		}
 		// did not find character, so create a new node
 		newNode := &Node[T]{
-			[]*Node[T]{},
-			character,
-			*new(T),
-			(i + 1) == numChars, // if we're the last character, set the IsEnd to true
+			Children: []*Node[T]{},
+			KeyRune:  character,
+			Value:    *new(T),
+			IsEnd:    (i + 1) == numChars, // if we're the last character, set the IsEnd to true
 		}
 		// add it to the parent's childrent
 		slog.Debug("creating new node", "before", parent.Children, "after", append(parent.Children, newNode))
 		parent.Children = append(parent.Children, newNode)
 		slog.Debug("parent v new", "parent", parent, "new", newNode)
 		parent = newNode
+		// final node, should set to value
+		if i+1 == numChars {
+			newNode.Value = value
+			return nil
+		}
 	}
 	return nil
 }
 
-func (t *Trie[T]) Search(key string) error {
-	return nil
+func (t *Trie[T]) Search(key string) (T, error) {
+	current := t.Root
+	for i, char := range key {
+		for _, node := range current.Children {
+			if node.KeyRune == char {
+				if node.IsEnd && (i+1) == len(key) {
+					return node.Value, nil
+				}
+				current = node
+				break
+			}
+		}
+	}
+	return *new(T), ErrNotFound
 }
 
 func (t *Trie[T]) Delete(key string) error {
