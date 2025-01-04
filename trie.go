@@ -29,7 +29,7 @@ func (n Node[T]) String() string {
 		s.WriteRune(n.Children[i].KeyRune)
 		s.WriteString(", ")
 	}
-	return fmt.Sprintf("Node val=%s Children=%s", string(n.KeyRune), s.String())
+	return fmt.Sprintf("Node key=%s Children=%s", string(n.KeyRune), s.String())
 }
 
 func NewTrie[T any]() *Trie[T] {
@@ -103,33 +103,75 @@ func (t *Trie[T]) Search(key string) (T, error) {
 	return *new(T), ErrNotFound
 }
 
-func (t *Trie[T]) Delete(key string) error {
-	return nil
+func (t *Trie[T]) Delete(key string) (T, error) {
+	return *new(T), nil
 }
 
-func (t *Trie[T]) Dump() []string {
-	// navigate DFS Trie until all words are found
-	return DFS(t.Root.Children, []rune{})
+func (t *Trie[T]) GetAll() []string {
+	// return findAllKeys(t.Root.Children, []rune{})
+	// Create a function that will accumulate all words in node
+	fun := func(node *Node[T], key string, accumulator []string) []string {
+		accumulator = append(accumulator, key)
+		return accumulator
+	}
+	return DepthFirstSearch(t.Root.Children, []rune{}, fun, []string{})
 }
 
-func DFS[T any](nodes []*Node[T], elements []rune) []string {
-	foundValues := []string{}
+func (t *Trie[T]) Clear() {
+	// DFS over every node and delete it (mark node nil for GC)
+	fun := func(nodes []*Node[T], i int, isLeafNode bool, key string, accumulator []string) []string {
+		nodes[i] = nil
+		return nil
+	}
+	depthFirstSearchEveryNode(t.Root.Children, []rune{}, fun, nil)
+	// reset the root node to
+	t.Root = &Node[T]{}
+}
+
+// DepthFirstSearch() traverses every node in the trie and calls leafNodeFun() when it reaches a leaf node.
+// leafNodeFun() parameters are the leaf *Node, the key for this Node, and the accumulator which is a value that is passed to every Leaf Node.
+// Accumulator allows DepthFirstSearch to perform an operations and return some value, such as count keys in trie.
+func DepthFirstSearch[T, A any](nodes []*Node[T], keys []rune, leafNodeFun func(*Node[T], string, A) A, accumulator A) A {
 	if len(nodes) == 0 {
-		slog.Error("no children nodes, this means that there is an unterminated node", "runes", string(elements))
-		return []string{string(elements)}
+		slog.Error("no children nodes, this means that there is an unterminated node", "accumulator", accumulator)
+		return accumulator
 	}
 
 	for _, node := range nodes {
-		slog.Debug("iterating over node", "val", node)
+		slog.Debug("node", "val", node)
 		if node.IsEnd {
-			// create a new word
-			foundValues = append(foundValues, string(elements)+string(node.KeyRune))
-			slog.Debug("found end", "values", foundValues)
+			keys = append(keys, node.KeyRune)
+			accumulator = leafNodeFun(node, string(keys), accumulator)
 			continue
 		}
-		// not end, continue DFS to its children
-		newValues := DFS(node.Children, append(elements, node.KeyRune))
-		foundValues = append(foundValues, newValues...)
+		// keys will start to diverge, for next DFS iteration create a copy of keys array
+		keysForThisTreePath := append(keys, node.KeyRune)
+		// not reached the end, continue DFS to nodes children
+		accumulator = DepthFirstSearch(node.Children, keysForThisTreePath, leafNodeFun, accumulator)
 	}
-	return foundValues
+	return accumulator
+}
+
+// depthFirstSearchEveryNode like depthFirstSearch but will call nodeFun on every node, in DFS order:
+//   - wiil call on first enountered leaf node
+//   - then call on parent's of leaf node until another leaf node is found
+func depthFirstSearchEveryNode[T, A any](nodes []*Node[T], keys []rune, nodeFun func([]*Node[T], int, bool, string, A) A, accumulator A) A {
+	if len(nodes) == 0 {
+		slog.Debug("no children nodes, this means that there is an unterminated node", "accumulator", accumulator)
+		return accumulator
+	}
+
+	for i, node := range nodes {
+		slog.Debug("node", "val", node)
+		if node.IsEnd {
+			keys = append(keys, node.KeyRune)
+			accumulator = nodeFun(nodes, i, true, string(keys), accumulator)
+			continue
+		}
+
+		keysForThisTreePath := append(keys, node.KeyRune)
+		accumulator = depthFirstSearchEveryNode(node.Children, keysForThisTreePath, nodeFun, accumulator)
+		nodeFun(nodes, i, false, string(keys), accumulator)
+	}
+	return accumulator
 }
