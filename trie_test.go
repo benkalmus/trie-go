@@ -35,7 +35,7 @@ func TestTrieInsert(t *testing.T) {
 
 		values := trie.GetAll()
 		expected := []string{word, word2}
-		assert.Equal(t, expected, values)
+		assert.ElementsMatch(t, expected, values)
 	})
 	t.Run("insert multiple but similar words", func(t *testing.T) {
 		trie := NewTrie[string]()
@@ -48,7 +48,7 @@ func TestTrieInsert(t *testing.T) {
 
 		values := trie.GetAll()
 		expected := []string{word, word2}
-		assert.Equal(t, expected, values)
+		assert.ElementsMatch(t, expected, values)
 	})
 	t.Run("insert the same word returns error", func(t *testing.T) {
 		trie := NewTrie[string]()
@@ -61,7 +61,22 @@ func TestTrieInsert(t *testing.T) {
 
 		values := trie.GetAll()
 		expected := []string{word}
-		assert.Equal(t, expected, values)
+		assert.ElementsMatch(t, expected, values)
+	})
+	t.Run("insert suffix of a word that already exists", func(t *testing.T) {
+		trie := NewTrie[string]()
+		word := "hello"
+		word2 := "hel"
+		err := trie.Insert(word, "")
+		assert.Equal(t, nil, err)
+
+		err = trie.Insert(word2, "")
+		assert.Equal(t, nil, err)
+
+		t.Logf(PrintTrie(trie.Root, "", 0, true))
+		values := trie.GetAll()
+		expected := []string{word2, word}
+		assert.ElementsMatch(t, expected, values)
 	})
 }
 
@@ -111,32 +126,91 @@ func TestTrieClear(t *testing.T) {
 		trie.Insert(word3, val)
 
 		got := trie.GetAll()
-		assert.Equal(t, []string{word, word3, word2}, got)
+		assert.ElementsMatch(t, []string{word, word3, word2}, got)
 		assert.Equal(t, 2, len(trie.Root.Children))
 
 		// clear the tree
 		trie.Clear()
 		got2 := trie.GetAll()
-		assert.Equal(t, []string{}, got2)
+		assert.ElementsMatch(t, []string{}, got2)
 		assert.Equal(t, 0, len(trie.Root.Children))
+	})
+}
+
+func TestTrieDelete(t *testing.T) {
+	t.Run("delete one word from trie", func(t *testing.T) {
+		trie := NewTrie[string]()
+		word := "hello"
+		val := "ok"
+		trie.Insert(word, val)
+		got, err := trie.Delete(word)
+		assert.Equal(t, val, got)
+		assert.Equal(t, nil, err)
+
+		values := trie.GetAll()
+		assert.Equal(t, []string{}, values)
+	})
+	t.Run("delete overlapping word", func(t *testing.T) {
+		trie := NewTrie[string]()
+		deleteWord := "hello"
+		word := "hel"
+		val := "ok"
+		trie.Insert(deleteWord, val)
+		trie.Insert(word, val)
+		t.Logf(PrintTrie(trie.Root, "", 0, true))
+		got, err := trie.Delete(deleteWord)
+		assert.Equal(t, val, got)
+		assert.Equal(t, nil, err)
+
+		t.Logf(PrintTrie(trie.Root, "", 0, true))
+		values := trie.GetAll()
+		assert.ElementsMatch(t, []string{word}, values)
+	})
+	t.Run("delete suffix of another word", func(t *testing.T) {
+		trie := NewTrie[string]()
+		word := "hello"
+		deleteWord := "help"
+		val := "ok"
+		trie.Insert(word, val)
+		trie.Insert(deleteWord, val)
+		trie.Insert(deleteWord, val)
+		got, err := trie.Delete(deleteWord)
+		assert.Equal(t, val, got)
+		assert.Equal(t, nil, err)
+
+		t.Logf(PrintTrie(trie.Root, "", 0, true))
+		values := trie.GetAll()
+		assert.ElementsMatch(t, []string{word}, values)
+	})
+	t.Run("delete word that does not exist returns error", func(t *testing.T) {
+		trie := NewTrie[string]()
+		word := "hello"
+		val := "ok"
+		trie.Insert(word, val)
+		got, err := trie.Delete("what")
+		assert.Equal(t, "", got)
+		assert.Equal(t, ErrNotFound, err)
+
+		values := trie.GetAll()
+		assert.ElementsMatch(t, []string{word}, values)
 	})
 }
 
 func TestTrieVisualize(t *testing.T) {
 	trie := NewTrie[string]()
 	val := "ok"
-	trie.Insert("cat", val)
-	trie.Insert("calm", val)
-	trie.Insert("calc", val)
-	trie.Insert("calcu", val)
-	trie.Insert("calcr", val)
-	trie.Insert("cab", val)
-	trie.Insert("cable", val)
+	trie.Insert("caat", val)
+	trie.Insert("caalm", val)
+	trie.Insert("caalc", val)
+	trie.Insert("caalcu", val)
+	trie.Insert("caalcr", val)
+	trie.Insert("caab", val)
+	trie.Insert("caable", val)
 	trie.Insert("as", val)
 	trie.Insert("ask", val)
 	trie.Insert("at", val)
 
 	// str := trie.Visualize()
-	// fmt.Printf(str)
-	PrintTrie(trie.Root, "", 0, true)
+	str := PrintTrie(trie.Root, "", 0, true)
+	t.Logf(str)
 }

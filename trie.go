@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 )
 
@@ -29,7 +30,11 @@ func (n Node[T]) String() string {
 		s.WriteRune(n.Children[i].KeyRune)
 		s.WriteString(", ")
 	}
-	return fmt.Sprintf("Node key=%s Children=%s", string(n.KeyRune), s.String())
+	return fmt.Sprintf("key='%s' val='%v' Children='%s'", string(n.KeyRune), n.Value, s.String())
+}
+
+func (t Trie[T]) String() string {
+	return fmt.Sprintf("\n%s\n", PrintTrie(t.Root, "", 0, true))
 }
 
 func NewTrie[T any]() *Trie[T] {
@@ -41,53 +46,50 @@ func NewTrie[T any]() *Trie[T] {
 // Operations
 
 func (t *Trie[T]) Insert(key string, value T) error {
-	// for each rune in string
-	// check if rune exists in current node,
-	// if yes, current node = next.node,
-	// if not create new node with value rune
-	parent := t.Root
-	numChars := len(key)
-	for i, character := range key {
-		found := false
-		for j := range parent.Children {
-			if parent.Children[j].KeyRune == character {
-				// the word already exists in the trie!
-				if (i + 1) == numChars {
-					slog.Debug("word exists", "val", key)
-					return ErrAlreadyExists
-				}
-				slog.Debug("char exists", "char", string(character))
-				// continue to this node's children nodes
-				parent = parent.Children[j]
-				found = true
-				break
-			}
+	return insert(t.Root, []rune(key), value)
+}
+
+func insert[T any](node *Node[T], key []rune, value T) error {
+	if len(key) == 0 {
+		if node.IsEnd {
+			return ErrAlreadyExists
 		}
-		if found {
-			continue
-		}
-		// did not find character, so create a new node
-		newNode := &Node[T]{
-			Children: []*Node[T]{},
-			KeyRune:  character,
-			Value:    *new(T),
-			IsEnd:    (i + 1) == numChars, // if we're the last character, set the IsEnd to true
-		}
-		// add it to the parent's childrent
-		slog.Debug("creating new node", "before", parent.Children, "after", append(parent.Children, newNode))
-		parent.Children = append(parent.Children, newNode)
-		slog.Debug("parent v new", "parent", parent, "new", newNode)
-		parent = newNode
-		// final node, should set to value
-		if i+1 == numChars {
-			newNode.Value = value
-			return nil
+		node.IsEnd = true
+		node.Value = value
+		return nil
+	}
+
+	if node == nil {
+		return ErrAlreadyExists
+	}
+	for i := range node.Children {
+		if key[0] == node.Children[i].KeyRune {
+			err := insert(node.Children[i], key[1:], value)
+			return err
 		}
 	}
-	return nil
+
+	newNode := &Node[T]{
+		Children: []*Node[T]{},
+		KeyRune:  key[0],
+		Value:    *new(T),
+		IsEnd:    false,
+	}
+	// slog.Debug("insert new node", "node", newNode, "isEnd", isTerminal)
+	// slog.Debug("node.children", "children", node.Children)
+
+	node.Children = append(node.Children, newNode)
+	// have we created a terminal node? (last char)
+	if len(key) == 1 {
+		newNode.Value = value
+		newNode.IsEnd = true
+		return nil
+	}
+	return insert(newNode, key[1:], value)
 }
 
 func (t *Trie[T]) Search(key string) (T, error) {
+	// TODO: do recursively and return index path
 	current := t.Root
 	for i, char := range key {
 		for _, node := range current.Children {
@@ -104,23 +106,64 @@ func (t *Trie[T]) Search(key string) (T, error) {
 }
 
 func (t *Trie[T]) Delete(key string) (T, error) {
-	return *new(T), nil
+	val, _, err := deleteNode(t.Root, []rune(key))
+	return val, err
 }
 
+func deleteNode[T any](node *Node[T], key []rune) (T, bool, error) {
+	// found key
+	if len(key) == 0 {
+		node.IsEnd = false // this removes the termination marker. Key will no longer be found
+		// If node is Terminal, we can safely delete it, return true
+		if len(node.Children) == 0 {
+			return node.Value, true, nil
+		} else {
+			// Has other children, so  this is just a substring of another key. don't delete
+			return node.Value, false, nil
+		}
+	}
+	// not found key
+	keyRune := key[0] // take first char
+	for i := range node.Children {
+		if node.Children[i].KeyRune == keyRune {
+			// DFS into subsequent children that match the key chars
+			val, safeToDelete, err := deleteNode(node.Children[i], key[1:])
+			if err != nil { // did not find key
+				return *new(T), false, err
+			}
+			// key has been found. Can we safely delete it?
+			// Node is safe to delete if it the key has no children. which was already determined
+			if safeToDelete {
+				node.Children[i] = nil
+				node.Children = slices.Delete(node.Children, i, i+1)
+			}
+			// also delete current node if it doesn't have any siblings. This will cleanup all unterminated leafs
+			if len(node.Children) < 1 && !node.IsEnd {
+				return val, true, nil
+			}
+			return val, false, nil
+		}
+	}
+	return *new(T), false, ErrNotFound
+}
+
+// test if a deleting help when hello exists removes
+
 func (t *Trie[T]) GetAll() []string {
-	// return findAllKeys(t.Root.Children, []rune{})
-	// Create a function that will accumulate all words in node
-	fun := func(node *Node[T], key string, accumulator []string) []string {
-		accumulator = append(accumulator, key)
+	// Create a function that will accumulate all words in trie
+	fun := func(nodes **Node[T], key string, accumulator []string) []string {
+		if (*nodes).IsEnd {
+			return append(accumulator, key)
+		}
 		return accumulator
 	}
-	return DepthFirstSearch(t.Root.Children, []rune{}, fun, []string{})
+	return depthFirstSearchEveryNode(t.Root.Children, []rune{}, fun, []string{})
 }
 
 func (t *Trie[T]) Clear() {
 	// DFS over every node and delete it (mark node nil for GC)
-	fun := func(nodes []*Node[T], i int, isLeafNode bool, key string, accumulator []string) []string {
-		nodes[i] = nil
+	fun := func(nodes **Node[T], key string, accumulator []string) []string {
+		nodes = nil
 		return nil
 	}
 	depthFirstSearchEveryNode(t.Root.Children, []rune{}, fun, nil)
@@ -128,24 +171,35 @@ func (t *Trie[T]) Clear() {
 	t.Root = &Node[T]{}
 }
 
-// DepthFirstSearch() traverses every node in the trie and calls leafNodeFun() when it reaches a leaf node.
-// leafNodeFun() parameters are the leaf *Node, the key for this Node, and the accumulator which is a value that is passed to every Leaf Node.
-// PrintTrie recursively prints the prefix tree in a structured format
-func PrintTrie[T any](node *Node[T], prefix string, offset int, isLast bool) {
-	if node == nil {
-		return
+func countNodesBelow[T any](node *Node[T], mapping map[*Node[T]]int) int {
+	// do a look up
+	if val, ok := mapping[node]; ok {
+		return val
 	}
+
+	num := len(node.Children)
+	for i := range node.Children {
+		num += countNodesBelow(node.Children[i], mapping)
+	}
+	// update map
+	mapping[node] = num
+	return num
+}
+
+// PrintTrie recursively prints the prefix tree in a structured format
+// //TODO: tidy
+func PrintTrie[T any](node *Node[T], prefix string, offset int, isLast bool) string {
+	if node == nil {
+		return ""
+	}
+	str := ""
 
 	// Print the current node
 	if node.KeyRune != 0 {
+		offset += 4
 		if isLast {
-			// var line strings.Builder
-			// line.WriteString(leftPad(offset, ' '))
 
-			fmt.Printf("%s└── %c\n", prefix, node.KeyRune)
-			offset += 4
-			// prefix = leftPad(offset, ' ')
-			// prefix = ""
+			str += fmt.Sprintf("%s└── %c", prefix, node.KeyRune)
 			for i := 0; i < 4; i++ {
 				if i%offset == 4 {
 					prefix += "|"
@@ -154,8 +208,7 @@ func PrintTrie[T any](node *Node[T], prefix string, offset int, isLast bool) {
 				prefix += " "
 			}
 		} else {
-			fmt.Printf("%s├── %c\n", prefix, node.KeyRune)
-			offset += 4
+			str += fmt.Sprintf("%s├── %c", prefix, node.KeyRune)
 			// prefix = ""
 			for i := 0; i < 4; i++ {
 				if i%offset == 0 {
@@ -167,11 +220,16 @@ func PrintTrie[T any](node *Node[T], prefix string, offset int, isLast bool) {
 			// prefix += "│   "
 		}
 	}
+	if node.IsEnd {
+		str += "*"
+	}
+	str += "\n"
 
 	// Recursively print the children
 	for i, child := range node.Children {
-		PrintTrie(child, prefix, offset, i == len(node.Children)-1)
+		str += PrintTrie(child, prefix, offset, i == len(node.Children)-1)
 	}
+	return str
 }
 
 func leftPad(amount int, char rune) string {
@@ -182,26 +240,25 @@ func leftPad(amount int, char rune) string {
 	return s.String()
 }
 
-// DepthFirstSearch() traverses every node in the trie and calls endNodeFun() when it reaches a end node.
+// DepthFirstSearchWord() traverses every node in the trie and calls endNodeFun() when it reaches a end node, that is a key.
 // endNodeFun() parameters are the end *Node, the key for this Node, and the accumulator which is a value that is passed to every end Node.
-// Accumulator allows DepthFirstSearch to perform an operations and return some value, such as count keys in trie.
-func DepthFirstSearch[T, A any](nodes []*Node[T], keys []rune, endNodeFun func(*Node[T], string, A) A, accumulator A) A {
+// Accumulator allows DepthFirstSearchWord to perform an operations and return some value, such as count keys in trie.
+func DepthFirstSearchWord[T, A any](nodes []*Node[T], keys []rune, endNodeFun func(*Node[T], string, A) A, accumulator A) A {
 	if len(nodes) == 0 {
-		slog.Error("no children nodes, this means that there is an unterminated node", "accumulator", accumulator)
+		// slog.Debug("no children nodes, reached end of subtree", "accumulator", accumulator)
 		return accumulator
 	}
 
 	for _, node := range nodes {
 		slog.Debug("node", "val", node)
+		keys := append(keys, node.KeyRune)
+
 		if node.IsEnd {
-			keys = append(keys, node.KeyRune)
+			// keys = append(keys, node.KeyRune)
 			accumulator = endNodeFun(node, string(keys), accumulator)
-			continue
 		}
-		// keys will start to diverge, for next DFS iteration create a copy of keys array
-		keysForThisTreePath := append(keys, node.KeyRune)
-		// not reached the end, continue DFS to nodes children
-		accumulator = DepthFirstSearch(node.Children, keysForThisTreePath, endNodeFun, accumulator)
+		// continue DFS to this node's children
+		accumulator = DepthFirstSearchWord(node.Children, keys, endNodeFun, accumulator)
 	}
 	return accumulator
 }
@@ -209,24 +266,38 @@ func DepthFirstSearch[T, A any](nodes []*Node[T], keys []rune, endNodeFun func(*
 // depthFirstSearchEveryNode like depthFirstSearch but will call nodeFun on every node, in DFS order:
 //   - wiil call on first enountered end node
 //   - then call on parent's of leaf node until another leaf node is found
-func depthFirstSearchEveryNode[T, A any](nodes []*Node[T], keys []rune, nodeFun func([]*Node[T], int, bool, string, A) A, accumulator A) A {
+//     NOTE: to be able to edit the node passed into nodeFun, a pointer is passed to the original pointer.
+//     This is because in Go, pointers are passed by value (creates another pointer that points to the original object)
+//     This will allow the caller to modify the node in any way, even setting it to nil
+//     TODO: should add some testcoverage around this
+//   - Alternate solution: return a new node from nodeFun which can be set back to the slice
+func depthFirstSearchEveryNode[T, A any](nodes []*Node[T], keys []rune, nodeFun func(**Node[T], string, A) A, accumulator A) A {
 	if len(nodes) == 0 {
-		slog.Debug("no children nodes, this means that there is an unterminated node", "accumulator", accumulator)
 		return accumulator
 	}
 
 	for i := range nodes {
 		slog.Debug("node", "val", nodes[i])
-		if nodes[i].IsEnd {
-			keys = append(keys, nodes[i].KeyRune)
-			accumulator = nodeFun(nodes, i, true, string(keys), accumulator)
-			continue
-		}
 
-		keysForThisTreePath := append(keys, nodes[i].KeyRune)
-		accumulator = depthFirstSearchEveryNode(nodes[i].Children, keysForThisTreePath, nodeFun, accumulator)
-		nodeFun(nodes, i, false, string(keys), accumulator)
+		keys := append(keys, nodes[i].KeyRune)
+		accumulator = depthFirstSearchEveryNode(nodes[i].Children, keys, nodeFun, accumulator)
+		accumulator = nodeFun(&nodes[i], string(keys), accumulator)
 	}
 	return accumulator
 }
 
+func breadthFirstSearch[T, A any](queue []*Node[T], keys []rune, nodeFun func([]*Node[T], int, int, string, A) A, accumulator A) ([]*Node[T], A) {
+	currentQueueLen := len(queue)
+	currentLevel := 0
+	for i := 0; i < len(queue); i++ {
+		if i == currentQueueLen {
+			currentQueueLen = len(queue)
+			currentLevel++
+		}
+		acc := nodeFun(queue, i, currentLevel, string(keys), accumulator)
+		accumulator = acc
+		queue = append(queue, queue[i].Children...)
+	}
+
+	return queue, accumulator
+}
