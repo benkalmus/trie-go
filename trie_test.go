@@ -121,3 +121,22 @@ func TestTrieClear(t *testing.T) {
 		assert.Equal(t, 0, len(trie.Root.Children))
 	})
 }
+
+func TestTrieVisualize(t *testing.T) {
+	trie := NewTrie[string]()
+	val := "ok"
+	trie.Insert("cat", val)
+	trie.Insert("calm", val)
+	trie.Insert("calc", val)
+	trie.Insert("calcu", val)
+	trie.Insert("calcr", val)
+	trie.Insert("cab", val)
+	trie.Insert("cable", val)
+	trie.Insert("as", val)
+	trie.Insert("ask", val)
+	trie.Insert("at", val)
+
+	// str := trie.Visualize()
+	// fmt.Printf(str)
+	PrintTrie(trie.Root, "", 0, true)
+}

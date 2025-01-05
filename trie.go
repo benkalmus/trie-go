@@ -130,8 +130,62 @@ func (t *Trie[T]) Clear() {
 
 // DepthFirstSearch() traverses every node in the trie and calls leafNodeFun() when it reaches a leaf node.
 // leafNodeFun() parameters are the leaf *Node, the key for this Node, and the accumulator which is a value that is passed to every Leaf Node.
+// PrintTrie recursively prints the prefix tree in a structured format
+func PrintTrie[T any](node *Node[T], prefix string, offset int, isLast bool) {
+	if node == nil {
+		return
+	}
+
+	// Print the current node
+	if node.KeyRune != 0 {
+		if isLast {
+			// var line strings.Builder
+			// line.WriteString(leftPad(offset, ' '))
+
+			fmt.Printf("%s└── %c\n", prefix, node.KeyRune)
+			offset += 4
+			// prefix = leftPad(offset, ' ')
+			// prefix = ""
+			for i := 0; i < 4; i++ {
+				if i%offset == 4 {
+					prefix += "|"
+					continue
+				}
+				prefix += " "
+			}
+		} else {
+			fmt.Printf("%s├── %c\n", prefix, node.KeyRune)
+			offset += 4
+			// prefix = ""
+			for i := 0; i < 4; i++ {
+				if i%offset == 0 {
+					prefix += "|"
+					continue
+				}
+				prefix += " "
+			}
+			// prefix += "│   "
+		}
+	}
+
+	// Recursively print the children
+	for i, child := range node.Children {
+		PrintTrie(child, prefix, offset, i == len(node.Children)-1)
+	}
+}
+
+func leftPad(amount int, char rune) string {
+	var s strings.Builder
+	for i := 0; i < amount; i++ {
+		s.WriteRune(char)
+	}
+	return s.String()
+}
+
+// DepthFirstSearch() traverses every node in the trie and calls endNodeFun() when it reaches a end node.
+// endNodeFun() parameters are the end *Node, the key for this Node, and the accumulator which is a value that is passed to every end Node.
 // Accumulator allows DepthFirstSearch to perform an operations and return some value, such as count keys in trie.
-func DepthFirstSearch[T, A any](nodes []*Node[T], keys []rune, leafNodeFun func(*Node[T], string, A) A, accumulator A) A {
+func DepthFirstSearch[T, A any](nodes []*Node[T], keys []rune, endNodeFun func(*Node[T], string, A) A, accumulator A) A {
 	if len(nodes) == 0 {
 		slog.Error("no children nodes, this means that there is an unterminated node", "accumulator", accumulator)
 		return accumulator
@@ -141,19 +195,19 @@ func DepthFirstSearch[T, A any](nodes []*Node[T], keys []rune, leafNodeFun func(
 		slog.Debug("node", "val", node)
 		if node.IsEnd {
 			keys = append(keys, node.KeyRune)
-			accumulator = leafNodeFun(node, string(keys), accumulator)
+			accumulator = endNodeFun(node, string(keys), accumulator)
 			continue
 		}
 		// keys will start to diverge, for next DFS iteration create a copy of keys array
 		keysForThisTreePath := append(keys, node.KeyRune)
 		// not reached the end, continue DFS to nodes children
-		accumulator = DepthFirstSearch(node.Children, keysForThisTreePath, leafNodeFun, accumulator)
+		accumulator = DepthFirstSearch(node.Children, keysForThisTreePath, endNodeFun, accumulator)
 	}
 	return accumulator
 }
 
 // depthFirstSearchEveryNode like depthFirstSearch but will call nodeFun on every node, in DFS order:
-//   - wiil call on first enountered leaf node
+//   - wiil call on first enountered end node
 //   - then call on parent's of leaf node until another leaf node is found
 func depthFirstSearchEveryNode[T, A any](nodes []*Node[T], keys []rune, nodeFun func([]*Node[T], int, bool, string, A) A, accumulator A) A {
 	if len(nodes) == 0 {
@@ -161,17 +215,18 @@ func depthFirstSearchEveryNode[T, A any](nodes []*Node[T], keys []rune, nodeFun 
 		return accumulator
 	}
 
-	for i, node := range nodes {
-		slog.Debug("node", "val", node)
-		if node.IsEnd {
-			keys = append(keys, node.KeyRune)
+	for i := range nodes {
+		slog.Debug("node", "val", nodes[i])
+		if nodes[i].IsEnd {
+			keys = append(keys, nodes[i].KeyRune)
 			accumulator = nodeFun(nodes, i, true, string(keys), accumulator)
 			continue
 		}
 
-		keysForThisTreePath := append(keys, node.KeyRune)
-		accumulator = depthFirstSearchEveryNode(node.Children, keysForThisTreePath, nodeFun, accumulator)
+		keysForThisTreePath := append(keys, nodes[i].KeyRune)
+		accumulator = depthFirstSearchEveryNode(nodes[i].Children, keysForThisTreePath, nodeFun, accumulator)
 		nodeFun(nodes, i, false, string(keys), accumulator)
 	}
 	return accumulator
 }
+
